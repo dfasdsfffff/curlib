@@ -1,0 +1,45 @@
+# Build outputs
+build/
+*.dll
+*.so
+*.lib
+*.a
+*.exe
+*.pdb
+
+# Rust
+rust/target/
+rust/Cargo.lock
+
+# C#
+csharp/obj/
+csharp/bin/
+*.csproj.user
+
+# Python
+python/__pycache__/
+*.pyc
+*.pyo
+
+# Go
+go/.gocache/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.tmp
+*.bak
