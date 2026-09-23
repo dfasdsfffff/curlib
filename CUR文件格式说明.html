@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CUR 文件格式说明</title>
+  <style>
+    :root { color-scheme: light; font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    body { max-width: 1100px; margin: 0 auto; padding: 32px; color: #202124; line-height: 1.65; }
+    h1, h2, h3 { color: #174ea6; }
+    code, pre { font-family: Consolas, "Courier New", monospace; }
+    code { background: #f1f3f4; padding: 2px 5px; border-radius: 3px; }
+    pre { overflow: auto; padding: 16px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; }
+    th, td { border: 1px solid #c7cdd4; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eaf2ff; }
+    .note { padding: 12px 16px; background: #fff8e1; border-left: 4px solid #f9ab00; }
+  </style>
+</head>
+<body>
+  <h1>CUR 文件格式说明</h1>
+
+  <p>CUR 是 PSD-BPA/PSModel 使用的二进制曲线文件。文件由 16 字节文件头、曲线描述记录和小端序 <code>float32</code> 数据组成。曲线描述中的文本通常使用 GBK 编码，数值区不是文本。</p>
+
+  <div class="note">
+    本文描述当前解析库支持的两种布局：普通 CUR 和 FDS 生成的 CUR。曲线数量、采样点数量和数据偏移必须从文件头计算，不能写死为某个 IEEE 算例的固定值。
+  </div>
+
+  <h2>1. 文件头</h2>
+  <p>文件头位于偏移 <code>0</code>，包含 4 个小端序 <code>uint32</code>：</p>
+  <table>
+    <thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>0</code></td><td>4</td><td><code>header0</code></td><td>文件标识或版本相关字段。当前解析库保留原值，不解释业务含义。</td></tr>
+      <tr><td><code>4</code></td><td>4</td><td><code>curveCountMinusOne</code></td><td>实际曲线列数减一。</td></tr>
+      <tr><td><code>8</code></td><td>4</td><td><code>sampleCount</code></td><td>每条曲线的采样点数量。</td></tr>
+      <tr><td><code>12</code></td><td>4</td><td><code>reserved</code></td><td>保留字段。不同文件可能为不同值，当前解析库不使用。</td></tr>
+    </tbody>
+  </table>
+  <pre><code>curveCount  = curveCountMinusOne + 1
+sampleCount = header.sampleCount</code></pre>
+  <p>数据区包含 <code>curveCount × sampleCount</code> 个单精度浮点数。第 0 列通常是时间列，后续列是监视曲线。</p>
+
+  <h2>2. 普通 CUR 布局</h2>
+  <p>普通 CUR 在文件头后保存 <code>curveCount - 1</code> 条曲线描述记录，每条记录 100 字节。第 0 列通常没有描述记录，描述从第 1 列开始。</p>
+  <table>
+    <thead><tr><th>区域</th><th>偏移或长度</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>文件头</td><td><code>0</code>，16 字节</td><td>4 个 <code>uint32</code>。</td></tr>
+      <tr><td>曲线描述</td><td><code>16</code>，<code>(curveCount - 1) × 100</code> 字节</td><td>对应第 1 到第 <code>curveCount - 1</code> 列。</td></tr>
+      <tr><td>数值区</td><td><code>16 + (curveCount - 1) × 100</code></td><td>按列连续排列的浮点数。</td></tr>
+      <tr><td>结束标记</td><td>通常为文件最后的 <code>0x1A</code></td><td>不属于浮点数据。</td></tr>
+    </tbody>
+  </table>
+  <pre><code>dataOffset  = 16 + (curveCount - 1) * 100
+valueOffset = dataOffset + (column * sampleCount + row) * 4</code></pre>
+
+  <h2>3. 普通 CUR 的曲线描述</h2>
+  <p>第 <code>i</code> 条普通 CUR 描述记录对应第 <code>i + 1</code> 列：</p>
+  <pre><code>recordOffset = 16 + i * 100</code></pre>
+  <table>
+    <thead><tr><th>记录内偏移</th><th>长度</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>0</code></td><td>80 字节</td><td>设备、对象或附加标识，通常为 GBK 文本，尾部可能用空格填充。</td></tr>
+      <tr><td><code>80</code></td><td>20 字节</td><td>曲线名称，通常为 GBK 文本，尾部可能用空格填充。</td></tr>
+    </tbody>
+  </table>
+  <p>文件读取后，解析库会为这两个字段添加 C 字符串结束符。原始有效长度最多分别为 80 和 20 字节。</p>
+
+  <h2>4. FDS CUR 布局</h2>
+  <p>FDS 生成的 CUR 在普通文件头后增加 3 条 100 字节元数据记录，然后保存 <code>curveCount</code> 条曲线头记录。解析库通过头部的 <code>PowerFlow FileName</code> 和 <code>Executed Time</code> 标记自动识别该布局。</p>
+  <table>
+    <thead><tr><th>区域</th><th>偏移或长度</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>文件头</td><td><code>0</code>，16 字节</td><td>与普通 CUR 相同。</td></tr>
+      <tr><td>FDS 元数据</td><td><code>16</code>，300 字节</td><td>3 条额外记录，包含程序、文件名和执行时间等信息。</td></tr>
+      <tr><td>曲线头</td><td><code>16 + 3 × 100</code>，<code>curveCount × 100</code> 字节</td><td>包含第 0 列在内的所有曲线头。</td></tr>
+      <tr><td>数值区</td><td><code>16 + (curveCount + 3) × 100</code></td><td>按列连续排列的浮点数。</td></tr>
+    </tbody>
+  </table>
+  <pre><code>fdsDataOffset = 16 + (curveCount + 3) * 100
+valueOffset   = fdsDataOffset + (column * sampleCount + row) * 4</code></pre>
+  <p>FDS 曲线头不是普通 CUR 的“80 字节设备字段 + 20 字节名称字段”布局。当前解析库将每条 FDS 曲线头的前 20 字节映射到 <code>device_gbk</code>，接下来的 20 字节映射到 <code>name_gbk</code>，其余头部内容保留在文件中但不暴露给 <code>CurCurve</code>。</p>
+  <p>已验证的 FDS 文件在结束标记前固定少 80 个数据字节，即少 20 个 <code>float32</code> 值。当前解析库为最后缺失的 20 个值补 <code>0.0</code>，并将最后的 <code>0x1A</code> 排除在数据区之外。</p>
+
+  <h2>5. 数据区</h2>
+  <p>数据区使用 IEEE-754 单精度浮点数，每个值 4 字节，小端序排列：</p>
+  <pre><code>float32 little-endian</code></pre>
+  <p>数据按列连续存储：</p>
+  <pre><code>列 0：sampleCount 个值
+列 1：sampleCount 个值
+...
+列 curveCount - 1：sampleCount 个值</code></pre>
+  <p>给定数据区起点 <code>dataOffset</code> 后，第 <code>column</code> 列第 <code>row</code> 个值的字节偏移为：</p>
+  <pre><code>valueOffset = dataOffset + (column * sampleCount + row) * 4</code></pre>
+
+  <h2>6. Python 读取示例</h2>
+  <p>推荐使用绑定库读取。它会自动识别普通 CUR 和 FDS CUR，不需要调用方判断文件类型：</p>
+  <pre><code>from python.cur import read, validate
+
+path = r"IEEE30_FDS.cur"
+library = r"build-fix\Debug\curlib.dll"
+
+validate(path, library)
+file = read(path, library)
+
+print("曲线列数：", file.curve_count)
+print("采样点数：", file.sample_count)
+print("第一列前 5 个值：", file.curves[0].values[:5])
+print("第一列名称：", file.curves[0].name)</code></pre>
+
+  <h2>7. C 接口中的内存和编码</h2>
+  <pre><code>typedef struct {
+    char device_gbk[81];
+    char name_gbk[21];
+    float *values;
+} CurCurve;
+
+typedef struct {
+    uint32_t header0;
+    uint32_t curve_count;
+    uint32_t sample_count;
+    CurCurve *curves;
+} CurFile;</code></pre>
+  <ul>
+    <li><code>device_gbk</code> 和 <code>name_gbk</code> 保存原始 GBK 字节，不应按 UTF-8 直接解码。</li>
+    <li><code>values</code> 指向 <code>sample_count</code> 个 <code>float</code>。</li>
+    <li><code>cur_read</code> 成功后，调用方必须使用 <code>cur_free</code> 释放内存。</li>
+    <li>Python、Go、Rust、Java 和 C# 绑定会复制数据，再释放 C 层内存。</li>
+  </ul>
+
+  <h2>8. 写回和 SWX 导出</h2>
+  <p><code>cur_write</code> 始终写出普通 CUR 布局。读取 FDS 后再写回 CUR 时，数值会写入标准布局，FDS 的 3 条元数据记录和其他 FDS 专用头部信息不会保留。</p>
+  <p><code>cur_export_swx</code> 输出的是按曲线列排列的平面文本，保留曲线顺序和名称字节。它不会重建 PSD-BPA 原始 SWX 的多段标题、分组和对齐空格。</p>
+
+  <h2>9. 解析注意事项</h2>
+  <ul>
+    <li>必须使用二进制模式读取文件。</li>
+    <li>不要把数值区当作 GBK 文本读取。</li>
+    <li>不要将数据解释为 <code>double</code>；格式使用 4 字节 <code>float32</code>。</li>
+    <li>不要根据文件名中的 <code>FDS</code> 判断格式，应检查文件内容。</li>
+    <li>不要把文件末尾的 <code>0x1A</code> 当作浮点数据。</li>
+    <li>曲线数量和采样点数量由文件头决定，不同算例的数量可能不同。</li>
+  </ul>
+</body>
+</html>
